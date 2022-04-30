@@ -1,3 +1,7 @@
+import struct
+
+zero = b'\xc0'
+
 class CamadaEnlace:
     ignore_checksum = False
 
@@ -43,22 +47,48 @@ class Enlace:
     def __init__(self, linha_serial):
         self.linha_serial = linha_serial
         self.linha_serial.registrar_recebedor(self.__raw_recv)
-
+        self.atual = b''
+        self.st1 = False
+        self.st2 = False
+    
     def registrar_recebedor(self, callback):
         self.callback = callback
 
     def enviar(self, datagrama):
-        # TODO: Preencha aqui com o código para enviar o datagrama pela linha
-        # serial, fazendo corretamente a delimitação de quadros e o escape de
-        # sequências especiais, de acordo com o protocolo CamadaEnlace (RFC 1055).
-        pass
+        datagrama = bytearray(datagrama)
+        datagrama_signal = []
+        for i, j in enumerate(datagrama):
+            if(datagrama[i] == 0xC0):
+                datagrama_signal += b'\xdb\xdc' 
+            elif(datagrama[i] == 0xDB):
+                datagrama_signal += b'\xdb\xdd' 
+            else:
+                datagrama_signal += (int.to_bytes(j, length=1, byteorder="big")) 
+        datagrama_signal = zero + bytearray(datagrama_signal) + zero
+        self.linha_serial.enviar(datagrama_signal)
 
     def __raw_recv(self, dados):
-        # TODO: Preencha aqui com o código para receber dados da linha serial.
-        # Trate corretamente as sequências de escape. Quando ler um quadro
-        # completo, repasse o datagrama contido nesse quadro para a camada
-        # superior chamando self.callback. Cuidado pois o argumento dados pode
-        # vir quebrado de várias formas diferentes - por exemplo, podem vir
-        # apenas pedaços de um quadro, ou um pedaço de quadro seguido de um
-        # pedaço de outro, ou vários quadros de uma vez só.
-        pass
+        zero = 0xC0
+        send = b''
+
+        for i, j in enumerate(dados):
+            if(j == 0xDB):
+                self.st1 = self.st2 = True
+            elif(self.st1 and j == 0xDC):
+                self.atual += (int.to_bytes(0xC0, length=1, byteorder="big")) 
+                self.st1 = self.st2 = False
+            elif(self.st2 and j == 0xDD):
+                self.atual += (int.to_bytes(0xDB, length=1, byteorder="big")) 
+                self.st1 = self.st2 = False
+            elif j == zero:
+                self.st1 = self.st2 = False
+                send = self.atual
+                if (len(send) != 0):
+                    try:
+                        self.callback(send)
+                    except:
+                        import traceback
+                        traceback.print_exc()
+                    self.atual = b''
+            else:
+                self.atual += (int.to_bytes(j, length=1, byteorder="big"))
